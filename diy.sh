@@ -30,6 +30,11 @@ cp -r "$T"/luci-app-usb3disable "$D"/ && rm -rf "$D"/luci-app-usb3disable/.git
 cp -r "$T"/OpenClash/luci-app-openclash "$D"/
 rm -rf package/feeds/luci/luci-app-openclash   # use vernesong upstream, not the feed copy
 
+# 25.12 luci.mk only builds luci-i18n-*-zh-cn from po/zh_Hans; older packages still ship po/zh-cn
+for p in "$D"/*/po/zh-cn; do
+  [ -d "${p%zh-cn}zh_Hans" ] || mv "$p" "${p%zh-cn}zh_Hans"
+done
+
 # 3. OpenClash data that auto-updates into overlay anyway: don't ship a stale copy in rom
 rm -f "$D"/luci-app-openclash/root/etc/openclash/GeoSite.dat
 rm -rf "$D"/luci-app-openclash/root/usr/share/openclash/ui/zashboard
