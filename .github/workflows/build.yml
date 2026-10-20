@@ -1,0 +1,83 @@
+name: build
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: ImmortalWrt branch
+        default: openwrt-25.12
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -a -f >/dev/null || true
+          df -h /
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+            bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex gawk gettext gcc-multilib \
+            g++-multilib git gnutls-dev gperf haveged help2man intltool lib32gcc-s1 libc6-dev-i386 libelf-dev \
+            libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses-dev libpython3-dev \
+            libreadline-dev libssl-dev libtool libyaml-dev libz-dev lld llvm lrzsz mkisofs msmtp nano \
+            ninja-build p7zip p7zip-full patch pkgconf python3 python3-pip python3-ply python3-docutils \
+            python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig texinfo uglifyjs \
+            upx-ucl unzip vim wget xmlto xxd zlib1g-dev zstd
+
+      - name: Prepare source
+        run: |
+          git clone --depth 1 -b "${{ inputs.branch }}" https://github.com/immortalwrt/immortalwrt openwrt
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          bash ../diy.sh
+          cp ../tr3000.config .config
+          make defconfig
+          echo "REV=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
+      - name: Check every wanted package survived defconfig
+        working-directory: openwrt
+        run: |
+          grep -E '^CONFIG_PACKAGE_.*=y$' ../tr3000.config | while read -r l; do
+            grep -qxF "$l" .config || echo "${l#CONFIG_PACKAGE_}"
+          done > ../dropped.txt
+          if [ -s ../dropped.txt ]; then echo "Packages dropped by defconfig:"; cat ../dropped.txt; exit 1; fi
+          for p in luci-app-turboacc samba4-server wsdd2 ipv6helper; do
+            ! grep -qx "CONFIG_PACKAGE_$p=y" .config || { echo "$p should not be selected"; exit 1; }
+          done
+
+      - name: Download sources
+        working-directory: openwrt
+        run: make download -j8
+
+      - name: Compile
+        working-directory: openwrt
+        run: make -j"$(nproc)" || make -j1 V=s
+
+      - name: Verify image
+        working-directory: openwrt
+        run: |
+          dtb=$(find build_dir -name 'image-mt7981b-cudy-tr3000-v1.dtb' | head -1)
+          dtc -I dtb -O dts "$dtb" 2>/dev/null | grep -q 'reg = <0x5c0000 0x7200000>' || { echo "dts ubi is NOT 114M"; exit 1; }
+          img=$(ls bin/targets/mediatek/filogic/*cudy_tr3000-v1-squashfs-sysupgrade.bin)
+          tar tvf "$img" | tee ../image-contents.txt
+          grep -q '"cudy,tr3000-v1"' "$img" || { echo "metadata lacks cudy,tr3000-v1"; exit 1; }
+          echo "dts 114M OK, metadata OK"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-${{ inputs.branch }}-${{ env.REV }}-tr3000-114m
+          path: |
+            openwrt/bin/targets/mediatek/filogic/*cudy_tr3000-v1*
+            openwrt/bin/targets/mediatek/filogic/*.manifest
+            openwrt/bin/targets/mediatek/filogic/config.buildinfo
+            openwrt/bin/targets/mediatek/filogic/sha256sums
+            image-contents.txt
