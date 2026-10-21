@@ -40,6 +40,7 @@ jobs:
           ./scripts/feeds install -a
           bash ../diy.sh
           cp ../tr3000.config .config
+          echo CONFIG_CCACHE=y >> .config
           make defconfig
           echo "REV=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
 
@@ -54,6 +55,12 @@ jobs:
             ! grep -qx "CONFIG_PACKAGE_$p=y" .config || { echo "$p should not be selected"; exit 1; }
           done
 
+      - uses: actions/cache/restore@v4
+        with:
+          path: openwrt/.ccache
+          key: ccache-${{ inputs.branch }}-${{ github.run_id }}
+          restore-keys: ccache-${{ inputs.branch }}-
+
       - name: Download sources
         working-directory: openwrt
         run: make download -j8
@@ -61,6 +68,12 @@ jobs:
       - name: Compile
         working-directory: openwrt
         run: make -j"$(nproc)" || make -j1 V=s
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: openwrt/.ccache
+          key: ccache-${{ inputs.branch }}-${{ github.run_id }}
 
       - name: Verify image
         working-directory: openwrt

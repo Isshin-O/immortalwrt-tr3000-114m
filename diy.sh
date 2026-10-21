@@ -30,8 +30,10 @@ cp -r "$T"/luci-app-usb3disable "$D"/ && rm -rf "$D"/luci-app-usb3disable/.git
 cp -r "$T"/OpenClash/luci-app-openclash "$D"/
 rm -rf package/feeds/luci/luci-app-openclash   # use vernesong upstream, not the feed copy
 
-# 25.12 luci.mk only builds luci-i18n-*-zh-cn from po/zh_Hans; older packages still ship po/zh-cn
+# 25.12 luci.mk only builds luci-i18n-*-zh-cn from po/zh_Hans; older packages still ship po/zh-cn.
+# Only touch luci.mk packages: OpenClash compiles po/zh-cn itself and breaks if renamed.
 for p in "$D"/*/po/zh-cn; do
+  grep -q 'feeds/luci/luci.mk' "${p%/po/zh-cn}/Makefile" || continue
   [ -d "${p%zh-cn}zh_Hans" ] || mv "$p" "${p%zh-cn}zh_Hans"
 done
 
